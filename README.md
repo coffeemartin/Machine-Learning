@@ -1,6 +1,6 @@
 # Machine-Learning
 
-Further to the previous EDA project, this project focus on Machine Learning , by using supervised and un supervised models.
+Further to the previous EDA project, this project focus on Machine Learning , by using supervised and un supervised models, using R Markdown, and deployed user friendly Shiny.app. 
 
 Classificaiton, Random forrest, Recursive Feature Elimination, Generalised Lasso Regression, Maximum Likelihood, Deviance, AIC, Naive Bayes, Roc Curve, Accuracy/precision/specifity/sensitivity, importance, Denisity Plots, LIME Explainer, Shiny Apps, K Mean Clustering, Hierachy Clustering.
 
