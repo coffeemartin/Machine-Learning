@@ -1,0 +1,2012 @@
+---
+title: "CITS4009 Project 2 - Modelling"
+author: "Fanchao(Franco) MENG - 23370209"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: html_document
+bibliography: bibfile.bib
+#runtime: shiny
+---
+
+<br>
+
+**My shiny App : https://www.youtube.com/watch?v=kFtkN3LI_EQ&ab_channel=FrancoM **
+
+- **The shiny App was built inside (last code block) the .Rmd file, hence no app.R submitted, but .rmd submitted**
+- **The runtime:shiny in above yaml section, need to be un # to run shiny block.** 
+
+<br>
+<br>
+
+### **Abstract**
+
+This is a continuation of Project 1 - Exploratory Data Analysis, by utilizing supervised and unsupervised machine learning model to further discover useful insights. 
+
+This report uses "Global YouTube Statistics 2023" dataset : (https://www.kaggle.com/datasets/nelgiriyewithana/global-youtube-statistics-2023), obtained from Kaggle, collected by Nidula Elgiriyewithana.
+
+The dataset has included top 995 Youtubers, based on, and ordered by the number of their subscribers. 
+
+<br>
+
+
+### **Literature Review**
+
+
+Digital platforms, have played a pivotal roles in our current economy, politics, and everyday living. 
+More and more content creators start to build career through their Youtube channels, and successful creators are able to enjoy the lavish profit and rewards Youtube provides. In 2022, @Cite_1 mentioned ‘over the past five years YouTube has paid out quite $5 billion to YouTube content creators. widespread YouTuber PewDiePie created $5 million in 2016 from YouTube alone’.
+
+According to Forbes’s 2022 list, the highest-paid Youtubers were Mr.Beast, with 150 million subscribers, making a staggering $54 million in 2022.
+
+Although people believe the direct relationships between ‘video views’ and ‘earning’, and is hard to verify how YouTube really pay the profit to content creators, but based on many online non-academic resources, earning are not purely on the number of video views, but rather on ‘ad views’, ‘each YouTuber has an individual CPM (cost per 1,000 views),  and it is correlated with how engaged audiences are, and how much ads have been viewed.
+
+
+While there are not many research directly investigate on the YouTube income, but many explorations on the YouTube itself, regarding the views, subscribers, and popularity, which are also meaningful for our study on YouTube earnings: 
+
+@Cite_2 provided an overall characterization of YouTubes, that ‘a vast majority of on average 85% of all views goes to a small minority of 3% of all channels’. His finding also shows that ‘older channels have a significantly higher probability to garner a large viewerships, but also shows that there has always been a small chance for young channels to become successful quickly, depending on whether they choose their genre wisely”. 
+
+This finding has provided some insights, of indication that possibly created_year, and genre, may be useful indicators for our income high/low classifications.
+
+@Cite_3  has started his research paper by pointing out, that ‘YouTube is a source of income for many people, and therefore a video’s popularity ultimately becomes the top priority for sustaining a steady income’, his team has performed interesting prediction of YouTube video popularity by using XGBoost. Below graph has shown their workflow and setup, which are extremely useful for our machine learning process. 
+<br>
+![Machine Learning Process](Modeling Process.png)
+
+
+<br>
+@Cite_3 concluded that, ‘video quality’, ‘video duration’ play a vital role in for video to become viral. These information are not gathered in out dataset, but maybe informative, or being good indicators on whether the income of YouTubers are high, or low. 
+
+@Cite_1 has also used linear regression, polynomial regression, K-Neighbors Classifier,  Decision Tree Regression to predict YouTuber popularity. The model contained features including ‘likes’, ‘dislike’, ‘views’, ‘comments count’, and ‘subscribers’. 
+
+
+
+
+### **1.Data Preparation, Transformation**
+<br>
+
+#### **1.1  Installing Packages, loading libraries.**
+<br>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+library(ggplot2)
+library(wesanderson)
+library(corrplot)
+library(dplyr)
+library(lubridate)
+library(ROCR)
+library(glmnet)
+library(caTools)
+library(caret)
+library(randomForest)
+library(countrycode)
+#library(tidyverse)
+library(kableExtra)
+library(knitr)
+library(pander)
+library(psych)
+library(gridExtra)
+library(RColorBrewer)
+library(vtreat)
+library(hexbin)
+library(lime)
+library(ROCit)
+
+```
+
+#### **1.2  Loading Data, Target Variable Selection.**
+<br>
+
+```{r}
+df.1 <- read.csv("project_2.csv")
+#str(raw_data)
+#summary(raw_data)
+#View(df.1)
+```
+
+```{r}
+df.2 <- subset(df.1, select = -c(Population,Gross.tertiary.education.enrollment....,Unemployment.rate,Urban_population,Latitude,Longitude))
+#colnames(df.2)
+```
+
+<br>
+
+Data were loaded from Project 1 EDA, however I have retrieved the data before all the missing values were filled by Vtreat packages. The missing values will be dealt carefully to suit machine learning model, with new 'variable_no_na' column created, in order to maintain integrity of the original data, similar with "Is_Bad" columns created by VTreat package, as some models are capable of dealing the missing values, and N/A may be an useful category/level in certain instances.
+
+
+In order to choose appropriate target variable from our 4 "earning" related variables. Below two considerations have been made : 
+
+- how correlated are these columns ? 
+
+- which column has the least numbers of missing values?  
+
+<br>
+```{r}
+earning_subset <- df.2[, which(names(df.2) %in% c("lowest_monthly_earnings","lowest_yearly_earnings","highest_monthly_earnings","highest_yearly_earnings"))]
+
+earning_subset <- na.omit (earning_subset)
+
+M_1 <- cor(earning_subset)
+test_Res_1 = cor.mtest(earning_subset, conf.level = 0.95)
+
+corrplot( M_1, p.mat = test_Res_1$p, method = 'color', tl.col="#003366", col=wes_palette(8, name = "Darjeeling1", type = "continuous"),  type = 'upper', insig='pch', addCoef.col ='black', tl.cex=0.55, number.cex = 0.6,number.font = 2, order = 'hclust',diag=TRUE , mar=c(1,1,2,1))
+title (main= "Fig.1 Correlation between 4 earning columns",cex.main=0.8, adj = 0.2, line = 3) 
+
+```
+
+
+
+
+```{r}
+
+my_na_function <- function(dataframe, digit, string ) {
+  if(missing(digit) & missing(string)) {
+    result <- apply(X = is.na(dataframe), MARGIN = 2, FUN = sum)
+    round (result/nrow(dataframe),2)
+  }
+  else if (missing(digit)){
+    result <- apply(X = (is.na(dataframe) | dataframe == string), MARGIN = 2, FUN = sum)
+    round (result/nrow(dataframe),2)
+  }
+  else if (missing(string)){
+    result <- apply(X = (is.na(dataframe) | dataframe == digit), MARGIN = 2, FUN = sum)
+    round (result/nrow(dataframe),2)
+  }
+  else {
+    result <- apply(X = (is.na(dataframe) | dataframe == digit | dataframe == string), MARGIN = 2, FUN = sum)
+    round (result/nrow(dataframe),2)
+  }
+}
+
+#sprintf("%0.1f%%", my_na_function (subset(df.2, select = c(lowest_monthly_earnings,highest_monthly_earnings,        #lowest_yearly_earnings,highest_yearly_earnings)) , 0,"Unknown"))
+
+missing_result <- as.data.frame(my_na_function (subset(df.2, select = c(lowest_monthly_earnings,highest_monthly_earnings, lowest_yearly_earnings,highest_yearly_earnings)) , 0,"Unknown"))
+colnames (missing_result) <- c( "Percentage")
+
+kable(missing_result,  booktabs = TRUE, longtable = F, caption = "** Table A: Missing Value Percentages **") %>%
+  kable_styling(font_size = 12)%>%
+  kable_styling(bootstrap_options = "bordered") %>% row_spec(4, background = "#74A089")
+```
+
+
+<br>
+From the results above correlation map, and NA percentage calculation function:  
+
+- Fig.1 : Due to strong correlation between all 4 columns, it is meaningful to choose any of these as our target variables. 
+
+- Table A : Column "Highest_monthly_earnings" is having the least numbers of missing value, therefore has been chosen for the target variable.
+
+*Both 0 (zero) and N/A have been considered as missing values.
+
+<br>
+<br>
+
+#### **1.3  Merging GDP Data.**
+<br>
+
+
+Two assumptions have been made : 
+
+- all the income were recorded in US dollar in the data, it is more meaningful to incorporate **country** in order to classify low/high income.
+
+- the "country" information indicate both "where the YouTube channel originates", and "where the account holder resides". 
+
+In order to making more meaningful classification, the latest 2022 GDP data was used to normalized the income figures. 
+
+For example, an yearly income of $30,000 may be classified as **Low Income** in developed country, but realistically this should be classified as **High Income** in developing / undeveloped countries, due to significant lower living costs. 
+
+* In the cases where certain countries having no 2022 gdp data recorded,  the most recent record in previous years data will be used.  
+
+```{r}
+df.gdp <- read.csv("API_NY.GDP.PCAP.CD_DS2_en_csv_v2_5871588.csv", skip = 4)
+
+years_to_remove <- paste0 ('X', seq(1960,2013))
+years_to_remove <- c('X',years_to_remove)
+
+df.gdp <- subset(df.gdp, select = ! (colnames(df.gdp) %in% (years_to_remove)))
+df.gdp$X2022 <- ifelse(is.na(df.gdp$X2022), df.gdp$X2021, df.gdp$X2022)
+df.gdp$X2022 <- ifelse(is.na(df.gdp$X2022), df.gdp$X2020, df.gdp$X2022)  #for cuba
+df.gdp$X2022 <- ifelse(is.na(df.gdp$X2022), df.gdp$X2014, df.gdp$X2022)  #for veVenezuela
+df.gdp$Country.Name[df.gdp$Country.Name=='Korea, Rep.'] <- 'South Korea'
+df.gdp$Country.Name[df.gdp$Country.Name=='Russian Federation'] <- 'Russia'
+df.gdp$Country.Name[df.gdp$Country.Name=='Turkiye'] <- 'Turkey'
+df.gdp$Country.Name <- sub(",.*", "", df.gdp$Country.Name)
+
+#df.gdp
+```
+
+```{r message=FALSE}
+df.countrynames <- unique(df.2$Country) 
+df.countrynames [!(df.countrynames%in% unique(df.gdp$Country.Name))]
+```
+
+Above code has checked that all countries have been merged successfully, apart from rows with "Unknown" in Country column.
+Below code has used the mean value of GDP data, to fill the N/A values where the country is 'unknown'. 
+
+```{r}
+df.gdp <- subset(df.gdp, select= c(Country.Name, X2022))
+names<-colnames(df.gdp)
+df.gdp[nrow(df.gdp)+1,] <- list('Unknown',mean(df.gdp$X2022[!is.na(df.gdp$X2022)]))
+#head(df.gdp)
+```
+
+```{r}
+df.3<-left_join(df.2,df.gdp, by=c("Country"="Country.Name"))
+#head(df.3)
+```
+
+
+
+```{r}
+#df.3[ which(is.na(df.3$highest_yearly_earnings )),]
+df.3 <- df.3[- which(is.na(df.3$highest_yearly_earnings )),]
+```
+<br>
+
+#### **1.4  Normalizing income data by using merged GDP data, then classifying results into 'High/low' income groups**
+
+
+- All the income figures have been normalized / adjusted as below.
+
+- A new **income** column has been created, where: 
+
+    - **1 : High Income**
+    - **0 : Low Income**
+
+- The target variable is balanced. 
+
+```{r}
+Normalise_index <- df.3[df.3$Country == 'United States', 'X2022'][1]
+df.3$Normalised_Income <- df.3$highest_yearly_earnings * (Normalise_index/df.3$X2022)
+
+
+med<-median(df.3$Normalised_Income)
+
+df.3$income <- ifelse(df.3$Normalised_Income>med, 1, 0)
+
+kbl(df.3[,c('highest_yearly_earnings','Normalised_Income','Country', 'income')],longtable = F, booktabs = TRUE,format.args = list(big.mark = ","),caption = "**Final Results of Nomalised Earning Info**  ")%>% 
+  kable_classic(full_width = T, html_font = "Cambria") %>%
+  kable_styling(latex_options = c( "hold_position","striped","scale_down"),font_size = 12)%>%
+  row_spec(0,background="#EBCC2A")%>%
+  column_spec(5, background = "#78B7C5")%>%
+  scroll_box(width = "80%", height = "480px")
+
+```
+<br>
+
+#### **1.5  Merge Continent information.**
+
+By using package **countrycode**, the data have been enriched with continent information based on country. 
+Due to many countries have extremely low instances in our data. Having a more broader classification by using continent information may become handy.
+
+
+```{r warning=FALSE}
+
+df.3$continent <- countrycode(sourcevar = df.3$Country, origin = "country.name", destination = "continent")
+df.3$continent <- ifelse(is.na(df.3$continent),'Unknown',df.3$continent)
+
+```
+
+Extracting Year information to create a Year column, from Created_Date column. 
+
+```{r}
+df.4<- subset(df.3, select = -c(lowest_monthly_earnings,highest_monthly_earnings,lowest_yearly_earnings,highest_yearly_earnings,Normalised_Income,rank,Youtuber,Title,Abbreviation,video_views_rank,country_rank,channel_type_rank,X2022))
+df.4 <- df.4 %>% dplyr::mutate (year = lubridate::year(df.4$created_date_1),month = lubridate::month(df.4$created_date_1),day = lubridate::day(df.4$created_date_1)) 
+df.4 <- subset(df.4, select = -c(created_date_1, month, day))
+#colnames(df.4)
+```
+
+<br>
+
+#### **1.6  Filling the missing values for column: subscribers_for_last_30_days.**
+
+
+Upon checking the data : 
+
+- There are still 284 rows with NAs in **subscribers_for_last_30_days** column
+- Decided to use **video_views_for_the_last_30_days** to fill in the N/A values.
+
+<br>
+
+
+```{r message=FALSE, warning=FALSE}
+na_index <- which(is.na(df.4$subscribers_for_last_30_days))
+ratio_vc <- df.4$video_views_for_the_last_30_days[-na_index] / df.4$subscribers_for_last_30_days[-na_index]
+P.3 <- ggplot() + aes(ratio_vc)+ geom_histogram( colour="midnightblue", fill="#00A08A") + labs(title = "Histogram of Ratio,  between 'video_views_for_the_last \n _30_days' & 'subscribers_for_last_30_days' ",caption = "Fig 2.1") + theme( plot.title = element_text(size=9, face = "bold"),axis.text=element_text(size=8),axis.title=element_blank()) 
+
+P.4 <- ggplot() + aes(ratio_vc)+ geom_histogram( colour="midnightblue", fill="#00A08A") +  xlim(c(0, 2500))+ labs(title = "Same histogram as left. \n with outliers excluded ",caption = "Fig 2.2") + theme( plot.title = element_text(size=9, face = "bold"),axis.text=element_text(size=8),axis.title=element_blank()) 
+
+grid.arrange (P.3,P.4, ncol = 2)
+```
+<br>
+
+- Above Fig 2.1 & Fig 2.2, are the histogram of **video_views_for_the_last_30_days / subscribers_for_last_30_days ratio**
+- Apart from some extreme outliers, the ratios are concentrated around 500 range.
+- Using median ratio to fill in the missing values in **subscribers_for_last_30_days ratio**
+
+
+```{r}
+median_ratio <- median(ratio_vc)
+df.4 <- df.4[-which(is.na(df.4$video.views)),]
+df.4$subscribers_for_last_30_days_no_na <- 0
+df.4<- df.4 %>% mutate(subscribers_for_last_30_days_no_na = if_else(is.na(subscribers_for_last_30_days), video_views_for_the_last_30_days/median_ratio, subscribers_for_last_30_days))
+df.4$income <- as.factor(df.4$income)
+```
+
+<br>
+
+### **2. Feature Selection **
+
+- Training/Testing data splitting, Data type conversion, Building Single Variable Model
+
+```{r}
+set.seed(12345)
+intrain <- runif(nrow(df.4)) < 0.8
+df.train <- df.4[intrain,]
+df.test <-df.4[!intrain,]
+#df.train
+#df.test
+```
+
+```{r}
+vars <- setdiff(colnames(df.4), c('income'))
+catVars <- vars[sapply(df.train[,vars],class) %in% c('factor','character')]
+numericVars <- vars[sapply(df.train[,vars],class) %in% c('numeric','integer')]
+
+catVars
+numericVars
+```
+
+<br>
+
+#### **2.1 Single Variable Model.**
+
+Below code create **pred_variable** columns for each column, in order to :
+
+- Transform all categorical variables into numeric variables, with extra **probability** information added. 
+- Group all numeric variables into pred_numeric variables, in order to normalize the data, which were heavily skewed, which have revealed by the EDA analysis.
+- Plot all receiver operating characteristic curve on the same plot to compare the performance. 
+
+* The code were adapted from lecture slides.
+
+```{r}
+plot_roc <- function(predcol, outcol, colour_id = 2, overlaid =F ) {
+  ROCit_obj <- rocit (score = predcol, class = outcol == "1")
+  par(new = overlaid ,  cex = 0.85)
+  plot (ROCit_obj, col = c(colour_id,"green"), legend = FALSE, YIndex = FALSE, values = FALSE)
+}
+
+```
+
+
+```{r}
+pos = 1
+mkPredC <- function(outCol, varCol, appCol) {
+pPos <- sum(outCol == pos) / length(outCol)
+naTab <- table(as.factor(outCol[is.na(varCol)]))
+pPosWna <- (naTab/sum(naTab))[pos]
+vTab <- table(as.factor(outCol), varCol)
+pPosWv <- (vTab[pos, ] + 1.0e-3*pPos) / (colSums(vTab) + 1.0e-3)
+pred <- pPosWv[appCol]
+pred[is.na(appCol)] <- pPosWna
+pred[is.na(pred)] <- pPos
+pred
+}
+
+
+for(v in catVars) {
+pi <- paste('pred_', v, sep='')
+df.train[,pi] <- mkPredC(df.train[,'income'], df.train[,v], df.train[,v])
+df.test[,pi] <- mkPredC(df.train[,'income'], df.train[,v], df.test[,v])
+}
+
+calcAUC <- function(predcol,outcol) {
+perf <- performance(prediction(predcol,outcol==pos),'auc')
+as.numeric(perf@y.values)
+}
+
+
+for(v in catVars) {
+pi <- paste('pred_', v, sep='')
+aucTrain <- calcAUC(df.train[,pi], df.train[,'income'])
+if (aucTrain >= 0.1) {
+aucCal <- calcAUC(df.test[,pi], df.test[,'income'])
+print(sprintf(
+"%s: trainAUC: %4.3f; calibrationAUC: %4.3f",
+pi, aucTrain, aucCal))
+}
+}
+
+```
+
+
+```{r message=FALSE, warning=FALSE,fig.asp=1}
+
+
+wes<- wes_palette(length(catVars), name = "Darjeeling1", type = "continuous")
+
+
+n=0
+pi.list<- ""
+colour.list <- ""
+for(v in catVars){
+pi <- paste('pred_', v, sep='')
+n = n+1
+plot_roc (df.test[,pi],df.test$income, colour_id = wes[n], overlaid = T)
+pi.list <- c(pi.list, pi)
+colour.list <- c(colour.list, wes[n])
+}
+legend(x = "topleft", legend=c(pi.list[2:length(pi.list)], "chance line"),  
+       lty = c(rep(1, length(pi.list)-1), 3), lwd = 2,  col = c(colour.list[2:length(pi.list)], "green"), text.font = 1)
+title("ROC for Categorical Pred_Variables on the Test Set")
+
+```
+
+```{r}
+mkPredN <- function(outCol, varCol, appCol) {
+cuts <- unique(
+quantile(varCol, probs=seq(0, 1, 0.1), na.rm=T))
+varC <- cut(varCol,cuts)
+appC <- cut(appCol,cuts)
+mkPredC(outCol,varC,appC)
+}
+
+
+for(v in numericVars) {
+pi <- paste('pred_', v, sep='')
+df.train[,pi] <- mkPredN(df.train[,'income'], df.train[,v], df.train[,v])
+df.test[,pi] <- mkPredN(df.train[,'income'], df.train[,v], df.test[,v])
+aucTrain <- calcAUC(df.train[,pi], df.train[,'income'])
+if(aucTrain >= 0.1) {
+aucCal <- calcAUC(df.test[,pi], df.test[,'income'])
+print(sprintf(
+"%s: trainAUC: %4.3f; calibrationAUC: %4.3f",
+pi, aucTrain, aucCal))
+}
+}
+
+
+```
+
+```{r message=FALSE, warning=FALSE,fig.asp=1}
+
+
+
+
+wes<- wes_palette(length(numericVars), name = "Darjeeling1", type = "continuous")
+
+
+n=0
+pi.list<- ""
+colour.list <- ""
+for(v in numericVars){
+pi <- paste('pred_', v, sep='')
+n = n+1
+plot_roc (df.test[,pi],df.test$income, colour_id = wes[n], overlaid = T)
+pi.list <- c(pi.list, pi)
+colour.list <- c(colour.list, wes[n])
+}
+legend(x = "topleft", legend=c(pi.list[2:length(pi.list)], "chance line"),  
+       lty = c(rep(1, length(pi.list)-1), 3), lwd = 2,  col = c(colour.list[2:length(pi.list)], "green"), text.font = 1)
+title("ROC for Numeric Pred_Variables on the Test Set")
+
+```
+
+
+<br>
+
+
+From above two ROC plots, all the single variable models by using **pred_variables** are performing poorly on the testing dataset, worse than random guess.
+This may also due to the fact that the target variable is balanced, which would require more features rather than single variables to predict accurately. 
+
+
+
+<br>
+
+#### **2.2 Building Null Model.**
+
+```{r}
+(Npos <- sum(df.train[,'income'] == 1))
+pred.Null <- Npos / nrow(df.train)
+cat("Proportion of outcome == 1 in df.train:", pred.Null)
+```
+
+
+#### **2.3 Log Likelihood / Deviance**
+
+
+```{r}
+
+logLikelyhood <- function(ytrue, ypred, epsilon = 1e-6) {
+  sum(ifelse(ytrue==1, log(ypred+epsilon), log(1-ypred-epsilon)),na.rm = T)
+}
+
+
+
+logNull <- logLikelyhood (df.train[,'income'], sum(df.train[,'income']==1)/nrow(df.train))
+logNull
+```
+
+```{r}
+selCatVars <- c()
+selPredCatVars <- c()
+minDrop<- 0
+
+for(v in catVars) {
+  pi <- paste('pred_',v,sep='')
+  devDrop <- logLikelyhood(df.train[,'income'],df.train[,pi])
+ # if(devDrop>=minDrop) {
+    print(sprintf("%s, likelihood: %g",pi,devDrop))
+    
+ # }
+}
+```
+
+
+```{r}
+selCatVars <- c()
+selPredCatVars <- c()
+minDrop<- 0
+
+for(v in catVars) {
+  pi <- paste('pred_',v,sep='')
+  devDrop <- 2*(logLikelyhood(df.train[,'income'],df.train[,pi]) - logNull)
+ # if(devDrop>=minDrop) {
+    print(sprintf("%s, deviance reduction: %g",pi,devDrop))
+    selCatVars <- c(selCatVars, v)
+    selPredCatVars <- c(selPredCatVars,pi)
+    
+ # }
+}
+```
+
+
+
+```{r message=FALSE, warning=FALSE}
+selNumVars <- c()
+selPredNumVars <- c()
+#minDrop<- 200
+
+for(v in numericVars) {
+  pi <- paste('pred_',v,sep='')
+  devDrop <- 2*(logLikelyhood(df.train[,'income'],df.train[,pi]) - logNull)
+ # if(devDrop>minDrop) {
+    print(sprintf("%s, deviance reduction: %g",pi,devDrop))
+    selNumVars <- c(selNumVars, v)
+    selPredNumVars <- c(selPredNumVars,pi)
+  #}
+}
+
+ 
+```
+```{r include=FALSE}
+catVars
+selCatVars
+selPredCatVars
+numericVars
+selNumVars
+selPredNumVars
+```
+<br>
+**Conclusion** :
+
+- Above drop deviance test shows negative results, which matching the results of ROC curve.
+- In comparison, the current Null Model is a good model which yields the smallest deviance, and largest log likelihood., as the target variable is perfectly balanced. 
+<br>
+
+
+#### **2.4 Chi-square Test  **
+
+- All the categorical variable, along with "pred_variables" were used for Chi-Square Test. 
+
+- The Chi-Square Test is for testing the independence between categorical variables, however it will also automatically treat each different numeric value as a new 'categorical level' for testing as well. Therefore the **Pred_Numerical_Variables** can be used for testing as each column only has 10 unique values / Probabilities 
+
+<br>
+```{r}
+variable <- c()
+chi_Statistic <- c()
+pred_numericVars <- paste('pred_', numericVars, sep='')
+pred_catVars <- paste('pred_', catVars, sep='')
+
+
+for(v in c(catVars,pred_catVars,pred_numericVars)) {
+  test<-chisq.test(df.train[,v], df.train[,'income'],simulate.p.value = TRUE)
+  variable <- c(variable, v)
+  chi_Statistic<- c(chi_Statistic,test$statistic)
+}
+
+chi.df <-data.frame(variable, chi_Statistic)
+kbl(chi.df[order(-chi.df$chi_Statistic),],longtable = F, booktabs = TRUE,  digits = 0,format.args = list(big.mark = ","),caption = "**Table B: Chi-Square Test Results**  ") %>% 
+  kable_classic(full_width = T, html_font = "Cambria") %>%
+  kable_styling(latex_options = c( "hold_position","striped","scale_down"),font_size = 12)%>%
+  row_spec(0,background="#EBCC2A")%>%
+  row_spec(c(1:7), background = "#78B7C5")%>%
+  scroll_box(width = "80%", height = "480px")
+
+
+```
+<br>
+
+
+
+Conclusion: 
+
+- Result above shows **Country**, **pred_video_views_for_the_last_30_days**, **pred_subscribers_for_last_30_days_no_na**, **continent** are having the highest Chi-Statistics, which means these variables could be **important features**, as they are not independent with target variable, and some sort of relationship exist.
+
+- Caveat : however, chi-square test are sensitive to the sample size, there are situations, especially in Country, only one observation in the dataset, such as **cuba / Afghanistan / Andorra**, these would violate the chi-square assumption where **all expected number should all be over 5**.
+- When the expected cell counts are lower than 5, it is recommended to use Fisher's Exact Test instead. 
+
+<br>
+
+
+#### **2.4 Fisher's Exact Test  **
+
+A guideline when to use Fisher's Exact Test :
+https://statisticsbyjim.com/hypothesis-testing/fishers-exact-test/
+
+- Cell counts are smaller than 20
+- A cell has an expected value 5 or less.
+- The column or row marginal values are extremely uneven.
+
+```{r}
+variable <- c()
+Statistic <- c()
+table_result <- c()
+for(v in c(catVars)) {
+  table_test <- table(df.train[,v], df.train[,'income'])
+  test<-fisher.test(table_test,alternative = 'two.sided',simulate.p.value=TRUE)
+  table_result <- rbind(table_result,table_test)
+  variable <- c(variable, v)
+  Statistic<- c(Statistic,test)
+}
+
+fish.df <-data.frame(variable, Statistic)
+
+
+kbl(table_result,longtable = F, booktabs = TRUE,  digits = 0,format.args = list(big.mark = ","),caption = "**Table C: Contingency Tabels for Categorical Variables, 0 : Low Income, 1 : High Income**  ") %>% 
+  kable_classic(full_width = T, html_font = "Cambria") %>%
+  kable_styling(latex_options = c( "hold_position","striped","scale_down"),font_size = 12)%>%
+  row_spec(0,background="#EBCC2A")%>%
+  row_spec(c(1:16), background = "#78B7C5")%>%
+  row_spec(c(17:63), background = "#74A089")%>%
+  row_spec(c(64:77), background = "lightgrey") %>%
+  row_spec(c(78:83), background = "#DC5C5C") %>%
+  scroll_box(width = "50%", height = "480px")
+```
+
+<br>
+
+Conclusion:
+
+- Fisher Exact Test shows all categorical variables are not independent from the target income high/low variables.
+
+- Above **Table C** is the summary of contingency table for references.
+
+
+**The rows are color coded as below:** 
+
+- **<span style="color: #78B7C5;">Blue  - Category</span>**
+
+- **<span style="color: #74A089;">Green - Country</span>**
+
+- **<span style="color: #5C5C5C;">Grey  - Channel Type</span>**
+
+- **<span style="color: #DC5C5C;">Red  - Continent</span>**
+
+<br>
+
+#### **2.5 Correlation  **
+
+<br>
+
+Above tests were mainly used for categorical variables, correlation matrix can be used for numeric variables. 
+
+Below are the two correlation map. 
+
+1. **Correlation between income and numerical variables**
+
+
+```{r}
+numeric_subset <- df.train[, which(names(df.train) %in% c(numericVars,'income'))]
+numeric_subset$income <- as.numeric(numeric_subset$income)
+numeric_subset <- na.omit (numeric_subset)
+
+M_1 <- cor(numeric_subset)
+test_Res_1 = cor.mtest(numeric_subset, conf.level = 0.95)
+
+corrplot( M_1, p.mat = test_Res_1$p, method = 'square', tl.col="#003366", col=wes_palette(8, name = "Darjeeling1", type = "continuous"), insig='pch', addCoef.col ='black', tl.cex=0.55, number.cex = 0.6,number.font = 2, order = 'hclust',diag=TRUE)
+```
+
+
+2. **Correlation between income and Pred_variables**
+
+
+
+
+
+```{r}
+
+allpredvar <- paste('pred_',vars,sep='')
+numeric_subset_2 <- df.train[, which(names(df.train) %in% c(allpredvar,'income'))]
+numeric_subset_2$income <- as.numeric(numeric_subset_2$income)
+numeric_subset_2 <- na.omit (numeric_subset_2)
+
+M_1 <- cor(numeric_subset_2)
+test_Res_1 = cor.mtest(numeric_subset_2, conf.level = 0.95)
+
+corrplot( M_1, p.mat = test_Res_1$p, method = 'square', tl.col="#003366", col=wes_palette(8, name = "Darjeeling1", type = "continuous"), insig='pch', addCoef.col ='black',  tl.cex=0.55, number.cex = 0.5,number.font = 2, order = 'hclust',diag=FALSE)
+```
+<br>
+
+Conclusion :
+
+From above Correlation matrices, below are the variables may be significant features. 
+
+- Video_views_for_the_last_30_days
+- Subscribers_for_last_30_days
+- Subscribers_for_last_30_days_no_na
+
+
+- Pred_Country
+- Pred_subscribers_for_last_30_days
+- Pred_subscribers_for_last_30_days_no_na
+- Pred_video_views_for_the_last_30_days
+
+
+<br>
+
+#### **2.6 Information Gain  **
+<br>
+
+By definition, information gain is part of the **Filter Methods** for feature selection, it calculate the reduction in entropy from the dataset.
+
+
+```{r warning=FALSE}
+library(FSelectorRcpp)
+result <- as.data.frame(information_gain(formula = income~., data = df.test) )
+colnames(result) <- c("attributes","importance")
+newdata <- result[order(-result$importance),]
+kbl(newdata,longtable = F, booktabs = TRUE, format.args = list(big.mark = ","),caption = "**Table D: Information Gain Results**  ") %>% 
+  kable_classic(full_width = T, html_font = "Cambria") %>%
+  kable_styling(latex_options = c( "hold_position","striped","scale_down"),font_size = 12)%>%
+  row_spec(0,background="#EBCC2A")%>%
+  row_spec(c(1:7), background = "#78B7C5")%>%
+  scroll_box(width = "80%", height = "480px")
+```
+
+<br>
+
+
+Conclusion :
+
+From above Information Gain results, it shows again, below features are possible important features. 
+
+- Country
+- Video_views_for_the_last_30_days
+- Subscribers_for_last_30_days
+- Subscribers_for_last_30_days_no_na
+
+- Pred_Country
+- Pred_subscribers_for_last_30_days
+- Pred_subscribers_for_last_30_days_no_na
+- Pred_video_views_for_the_last_30_days
+
+
+<br>
+
+
+Two sets of selected features.
+
+- From the single variable model AUC / Log likelihood / Deviance : Pred_category, pred_channel_type, pred_subscribers, pred_year
+- From Chi-Square, Correlation, Information Gain : Country / Video_views_for_the_last_30_days / Subscribers_for_last_30_days
+
+
+However above two sets of features are more for the project requirements purpose. 
+Due to the relatively small number of features in the data, and also due to different model may require different combination of features for test. The below model training process will involve a lot more feature combination for the performance results.
+
+Some models also incorporate the cross validation, as well as feature selection process.  
+
+<br>
+
+
+### **3. Modelling**
+
+<br>
+
+
+#### **3.1 Penalized Logistic Regression with LASSO penalty**
+
+<br>
+Regularization methods are also called penalization method
+
+@Cite_4 summarized the logistic regression as "The logistic regression model is a model that describes the relationship between several factors(predictor variables) with dichotomous (binary) response variables".
+
+In simple words, logit function has been used, log(odds) on the left hand side of the regression formular. 
+
+$$\mathbf{Logit(\pi_{i}) = Log(\frac{\pi_{i}}{1-\pi_{i}}})$$
+
+Usually in logistic regression, **Maximum Likelihood Estimation / MLE** is used for parameter estimation. However there is another method, which will be used here for the parameter estimation : **Least Absolute Shrinkage and Selection Operator (LASSO)**
+
+The LASSO penalty function is :
+
+$$\mathbf{P(\beta) = \sum_{j = 1}^{p} |\beta_{j}|}$$
+LASSO can shrink some coefficients towards zero and even exactly zero, in order to perform selection of the predictor variables as well. 
+
+The regulation purpose is to balance the accuracy and simplicity of the model, the ideal goal is by using smallest number of features, to return with a good accuracy. 
+
+<br>
+
+**Building Model : model_glmnet**
+
+
+Some code below are adapted from : [Link](http://www.sthda.com/english/articles/36-classification-methods-essentials/149-penalized-logistic-regression-essentials-in-r-ridge-lasso-and-elastic-net/)
+
+
+
+```{r}
+df.train$income <- as.factor(df.train$income)
+
+x<- model.matrix (income ~ pred_category + pred_Country + pred_channel_type + pred_continent + pred_year + pred_subscribers + pred_video.views + pred_uploads+pred_video_views_for_the_last_30_days+pred_subscribers_for_last_30_days_no_na,df.train)[,-1]
+y<- df.train$income
+
+
+cv.lasso <- cv.glmnet(x,y,alpha=1, family = 'binomial')
+
+model_glmnet <- glmnet(x,y,alpha=1,family = 'binomial',lambda = cv.lasso$lambda.min)
+
+Predict_Train.1 <- model_glmnet %>% predict(newx = x, type='response')
+
+coef(model_glmnet)
+
+```
+<br>
+**Making Prediction on the Testing Data**
+
+```{r}
+x.test <- model.matrix(income ~ pred_category+ pred_Country + pred_channel_type + pred_continent + pred_year + pred_subscribers + pred_video.views+pred_uploads+pred_video_views_for_the_last_30_days+pred_subscribers_for_last_30_days_no_na,df.test)[,-1]
+probabilities <- model_glmnet %>% predict(newx = x.test, type='response')
+predicted.classes <- ifelse(probabilities > 0.5, "1", "0")
+# Model accuracy
+observed.classes <- df.test$income
+
+
+table(observed.classes,predicted.classes)
+
+```
+<br>
+**Find the optimal value of lambda that minimizes the cross-validation error**
+
+```{r}
+cv.lasso <- cv.glmnet(x, y, alpha = 1, family = "binomial")
+plot(cv.lasso)
+```
+
+- Above plot displays the cross-validation error, the above plot shows when **Log($\lambda$)** is approximately -6, it will minimize the prediction error.
+
+- this optimal value is:
+
+```{r}
+cv.lasso$lambda.min
+```
+In oder to reduce the model complexity, cv.glmnet() also finds the **$\lambda$** which will give the simplest model but also lies within 1 standard error of above optimal **$\lambda$**, this best balanced value is :
+
+```{r}
+cv.lasso$lambda.1se
+```
+```{r eval=FALSE, include=FALSE}
+coef(cv.lasso, cv.lasso$lambda.min)
+coef(cv.lasso, cv.lasso$lambda.1se)
+```
+
+Below shows the model when **$\lambda$** being replace by the most balance one, rather than most optimal one. 
+
+
+```{r}
+
+model_glmnet.2 <- glmnet(x, y, alpha = 1, family = "binomial",
+                      lambda = cv.lasso$lambda.1se)
+coef(model_glmnet.2)
+
+```
+<br>
+
+- As we can see from above, two more features have now been further eliminated. Left with 6 features in total in the logistic regression.
+
+- Below validated, the prediction is still as good as the first model, when the optimal **$\lambda$** was used.
+
+<br>
+
+```{r}
+probabilities.2<- model_glmnet.2 %>% predict(newx = x.test, type='response')
+predicted.classes.2 <- ifelse(probabilities.2 > 0.5, "pos", "neg")
+
+table(observed.classes,predicted.classes.2)
+
+```
+
+<br>
+
+```{r}
+
+performanceMeasures <- function(train_true, train_pred,test_true, test_pred, data.name.1 = "Training",data.name.2 = "Testing" , threshold=0.5) {
+
+cmat <- table(actual = train_true, predicted = train_pred >= threshold)
+accuracy <- sum(diag(cmat)) / sum(cmat)
+precision <- cmat[2, 2] / sum(cmat[, 2])
+recall <- cmat[2, 2] / sum(cmat[2, ])
+f1 <- 2 * precision * recall / (precision + recall)
+trainperf_df<-data.frame(model = data.name.1, precision = precision,
+recall = recall, f1 = f1)
+tmat <- table(actual = test_true, predicted = test_pred >= threshold)
+accuracy <- sum(diag(tmat)) / sum(tmat)
+precision <- tmat[2, 2] / sum(tmat[, 2])
+recall <- tmat[2, 2] / sum(tmat[2, ])
+f1 <- 2 * precision * recall / (precision + recall)
+testperf_df <- data.frame(model = data.name.2, precision = precision,
+recall = recall, f1 = f1)
+perftable <- rbind(trainperf_df, testperf_df)
+perftable
+}
+test.1 <- performanceMeasures(  y, Predict_Train.1,data.name.2 = "Testing ( with Optimal Lambda lambda.min ) " , observed.classes,probabilities)
+test.2 <- performanceMeasures(  y, Predict_Train.1,data.name.2 = "Testing ( with Balanced Lambda lambda.1se ) ", observed.classes,probabilities.2)
+test.3 <- rbind(test.1, test.2)
+```
+
+
+
+
+
+
+```{r}
+
+kbl(test.3,longtable = F, booktabs = TRUE, format.args = list(big.mark = ","),caption = "**Table E.2: Penalised Logistic Regression **")%>% 
+  kable_classic(full_width = T, html_font = "Cambria") %>%
+  kable_styling(latex_options = c( "hold_position","striped","scale_down"),font_size = 12)%>%
+  row_spec(0,background="#EBCC2A")
+
+```
+
+<br>
+
+Conclusion:
+
+- The Penalized Logistic Regression with LASSO penalty has performed quite well in the testing data set. 
+- The simpler model by using cv.lasso$lambda.1se, rather than using the optimal lambda, is still returning exceptional results on testing dataset. 
+
+<br>
+
+
+
+
+
+
+
+#### **3.2 Random Forest / Decision Tree**
+<br>
+
+Bagging is an ensemble algorithm that fits multiple models on different subsets of a training dataset, then combines the predictions from all models.
+
+Random forest is an extension of bagging that also randomly selects subsets of features used in each data sample.
+
+Random forest also have an out-of-bag (OOB) sample that provides a built-in validation set. 
+
+
+- How does TrunRF function work: 
+
+tuneRF function based on Rdocument description : Starting with the default value of mtry, search for the optimal value (with respect to Out-of-Bag error estimate) of mtry for randomForest.
+
+There are 22 variables in the first attempt, so the mtry default value would be **sqrt(22)** , 4 or 5
+Then mtry default will divided by, or times stepFactor settings **1.1**, to calculate the OBB error , **OBB_Left** ,**OBB_Right**
+
+<br>
+```{r}
+df.train.1 <- subset(df.train, select = -c(subscribers_for_last_30_days))
+df.train.1$income <- as.factor(df.train.1$income)
+bestmtry <- tuneRF(df.train.1,df.train.1$income,stepFactor = 1.1, improve = 0.01, trace=F, plot= T) 
+```
+<br>
+As seem from above, the initial Mtry as 4, has OOB Error 0. Therefore it stopped at 4.
+
+<br>
+
+- **First attempt with all the original variables** (Formula as below) 
+
+```{r}
+vars.1 <- c("subscribers","video.views","category","uploads","Country" ,"channel_type","video_views_for_the_last_30_days","continent","year"
+          ,"subscribers_for_last_30_days_no_na")
+
+formula_rf <- paste('income',' ~ ', paste(vars.1, collapse=' + '), sep='')
+formula_rf
+```
+<br>
+```{r}
+formula_rf <- as.formula(formula_rf)
+model_rf <- randomForest(formula_rf,data= df.train.1, mtry=4)
+model_rf$confusion
+```
+<br>
+
+- Above shows model_rf did a good job on the training dataset.
+- Below shows importance of all the variables in Random Forest Model_rf
+
+<br>
+```{r}
+#importance(model_rf) 
+varImpPlot(model_rf)
+```
+<br>
+```{r}
+
+df.test.1 <- subset(df.test, select = -c(subscribers_for_last_30_days))
+
+pred_test <- predict(model_rf, newdata = df.test.1, type= "class")
+
+#pred_test
+#df.test.1$income
+#head(predict(model_rf, newdata = df.test.1, type = "Prob"))
+
+confusionMatrix(table(pred_test,df.test.1$income))
+```
+
+<br>
+
+- Above shows by using the model_rf, the model performed poorly, especially on negative class, which leads to just around 50% of sensitivity .
+
+<br>
+
+
+- **Discussion on the first rf model** 
+
+    - The over fitting issue presents in above experiment, when all variables were used for the model.
+
+- **Other experiments with different combination of the features**
+
+    - By using less variables from above selected features, multiple experiments have been conducted, not all code demonstrated here .
+
+<br>
+
+```{r}
+vars.2<- c("pred_Country", "pred_video_views_for_the_last_30_days","pred_subscribers","pred_year")
+vars.3<- c("continent", "video_views_for_the_last_30_days","subscribers")
+formula_rf.2 <- as.formula(paste('income',' ~ ', paste(vars.2, collapse=' + '), sep=''))
+formula_rf.3 <- as.formula(paste('income',' ~ ', paste(vars.3, collapse=' + '), sep=''))
+model_rf.2 <- randomForest(formula_rf.2,data= df.train.1)
+model_rf.3 <- randomForest(formula_rf.3,data= df.train.1)
+model_rf.2$confusion
+model_rf.3$confusion
+```
+<br>
+
+- Above training confusion matrix shows reduced performance when the feature numbers are dropped.
+- Below test confusion matrix has proven the over-fitting issues have been reduced. 
+
+<br>
+
+```{r}
+
+pred_test.2 <- predict(model_rf.2, newdata = df.test.1, type= "class")
+pred_test.3 <- predict(model_rf.3, newdata = df.test.1, type= "class")
+
+confusionMatrix(table(pred_test.2,df.test.1$income))
+confusionMatrix(table(pred_test.3,df.test.1$income))
+```
+
+<br>
+
+-  **LIME Ex-plainer, by using the model_rf.3 model**
+
+
+
+```{r}
+explainer <- lime(df.train[,vars.3], model=as_classifier( model_rf.3),
+    bin_continuous=TRUE, n_bins=10)
+
+
+example.1 <- df.test[15,vars.3]
+explanation.1 <- lime::explain(example.1, explainer, n_labels = 1, n_features = 3)
+plot_features(explanation.1)
+```
+<br>
+
+**Explanation 1:** 
+
+Above result shows 
+
+- **video_views_for_the_last_30_days** was the main strong evidence for income = 1 (high) classification 
+- **Continent = Americas** contradict the predicted classification.
+
+The table below shows the income situation for Continent = Americas, which validates the contradict explaining above. 
+
+- If only based on the continent, the predicted class most likely should be 0 (low)
+
+```{r}
+table(df.test[df.test$continent == 'Americas', 'income'])
+```
+
+<br>
+```{r}
+example.2 <- df.test[69,vars.3]
+explanation.2 <- lime::explain(example.2, explainer, n_labels = 1, n_features = 3)
+plot_features(explanation.2)
+
+```
+<br>
+
+**Explanation 2:** 
+
+Above result shows the different story comparing with explanation 1: 
+
+- **Continent = Americas** has become the strong evidence for the classification of income = 0 (low). 
+- **video_views_for_the_last_30_days** now contradicts the classification 
+
+
+- In the **density plot** below, the green vertical line indicates the case above. If the classification is only based on the **video_views_for_the_last_30_days**, the predicted class most likely should be 1 (High), which match the contradict explanation above.
+
+ 
+
+```{r message=FALSE, warning=FALSE}
+
+ggplot(df.test)+ geom_density (aes(x=video_views_for_the_last_30_days, color = income), linewidth=0.8) + geom_vline(xintercept = example.2[,'video_views_for_the_last_30_days'], color="#74A089", linewidth=0.8) + xlim(0, 500000000)
+```
+<br>
+
+
+-  **For practice purpose, below is a demo of simple decision tree plot**
+
+```{r warning=FALSE}
+library(rpart)
+dt <- rpart(formula = formula_rf, data = df.train.1)
+library(rpart.plot)
+rpart.plot(dt)
+#predict(dt, newdata=df.test.1)
+```
+<br>
+
+#### **3.3 RFE : Recursive Feature Elimination / Cross Validation **
+<br>
+
+Recursive feature elimination is a popular feature selection method, it recursively eliminates one feature or small set of feature at a time, by using cross-validation. 
+
+In order to better select features for above random forest model, below will use RFE to perform best features,by fitting a random Forrest model within. 
+
+
+Some of code below are adapted from : [Link](https://towardsdatascience.com/effective-feature-selection-recursive-feature-elimination-using-r-148ff998e4f7)
+
+
+- **rfFuncs** was called to use 'random forest' for importance calculation
+- **10-fold cross-validation with 5 repeats** are the settings for cross-validation.
+
+<span style="color: red;">However this time , **the video_view_for_last_30_days** has been removed from the candidates.
+As it is shown from above models, and also a known knowledge, where **views** is a strong predictor of **earning**, regardless whether it is actual **video viewership**, or **ad viewership**.</span>
+
+<br>
+
+```{r warning=FALSE}
+
+rfe_train <- df.train %>% select (c(pred_catVars, pred_numericVars))  %>% select(-c(pred_subscribers_for_last_30_days,pred_video_views_for_the_last_30_days)) 
+rfe_train.1 <- df.train %>% select (c(catVars, numericVars))  %>% select(-c(subscribers_for_last_30_days,video_views_for_the_last_30_days)) 
+
+rfe_income <- as.factor(df.train$income) 
+rfe_train<-  mutate_if(rfe_train, is.character, as.factor)
+#summary(rfe_train)
+#length(rfe_income)
+
+control <- rfeControl(functions = rfFuncs, 
+                      method = "repeatedcv", 
+                      repeats = 5, 
+                      number = 10) 
+
+result_rfe1 <- rfe(x = rfe_train, 
+                   y = rfe_income, 
+                   sizes = c(1:ncol(rfe_train)),
+                   rfeControl = control)
+
+result_rfe1.1 <- rfe(x = rfe_train.1, 
+                   y = rfe_income, 
+                   sizes = c(1:ncol(rfe_train.1)),
+                   rfeControl = control)
+```
+
+
+- RFE has been performed twice in above code. one for all the original variables, another one for pre_variables. **the video_view_for_last_30_days** has been excluded from RFE.
+
+
+- For pred_variables, the recommended variables are :
+
+```{r,out.height = "50%", out.width= "75%"}
+
+#pander(predictors(result_rfe1))
+
+#kbl(varImp(result_rfe1))
+
+
+
+varimp_data <- data.frame(feature = row.names(varImp(result_rfe1)),
+                          importance = varImp(result_rfe1)[, 1])
+
+ggplot(data = varimp_data, 
+       aes(x = reorder(feature, importance), y = importance, fill = feature)) +
+  geom_bar(stat="identity") + labs(x = "Features", y = "Variable Importance") + 
+  geom_text(aes(label = round(importance, 2)), hjust=2, color="white", size=4) + 
+  theme_bw() + theme(legend.position = "none")+ coord_flip()   + scale_fill_manual(values = rev(wes_palette(length(varimp_data$feature), name = "Darjeeling1", type = "discrete")), name = "")  
+```
+<br>
+
+- These three variables reached the best performance (Accuracy over 0.95) as the plot shows below.
+
+<br>
+
+```{r}
+ggplot(data = result_rfe1, metric = "Accuracy") + theme_bw()
+```
+<br>
+
+- For original variables, the recommended variables are :
+
+```{r,out.height = "50%", out.width= "75%"}
+#pander(predictors(result_rfe1.1))
+
+
+varimp_data.1 <- data.frame(feature = row.names(varImp(result_rfe1.1)),
+                          importance = varImp(result_rfe1.1)[, 1])
+
+ggplot(data = varimp_data.1, 
+       aes(x = reorder(feature, importance), y = importance, fill = feature)) +
+  geom_bar(stat="identity") + labs(x = "Features", y = "Variable Importance") + 
+  geom_text(aes(label = round(importance, 2)), hjust=2, color="white", size=4) + 
+  theme_bw() + theme(legend.position = "none")+ coord_flip()   + scale_fill_manual(values = rev(wes_palette(length(varimp_data$feature), name = "Darjeeling1", type = "discrete")), name = "")  
+
+
+
+```
+<br>
+- These two variables reached the best performance (Accuracy over 0.69) as the plot shows below. 
+<br>
+```{r}
+ggplot(data = result_rfe1.1, metric = "Accuracy") + theme_bw()
+```
+
+<br>
+
+
+- Using the first 3 pred_variables recommended in the frist REF cross validation feature selection process, below is the model result on the testing data.
+
+
+
+```{r}
+rfe_test <- df.test %>% select (c("pred_Country","pred_subscribers_for_last_30_days_no_na","pred_video.views"))  
+rfe_test_income <- as.factor(df.test$income) 
+rfe_test<-  mutate_if(rfe_test, is.character, as.factor)
+
+postResample(predict(result_rfe1, rfe_test), rfe_test_income)
+```
+<br>
+```{r}
+ref_predict <- predict(result_rfe1, rfe_test)
+kbl(ref_predict,longtable = F, booktabs = TRUE, format.args = list(big.mark = ","),caption = "**Table F: Predicted Result on testing data, with predicted probablity for each class,  by using RFE**  ") %>% 
+  kable_classic(full_width = T, html_font = "Cambria") %>%
+  kable_styling(latex_options = c( "hold_position","striped","scale_down"),font_size = 12)%>%
+  row_spec(0,background="#EBCC2A") %>%
+  scroll_box(width = "50%", height = "480px")
+```
+
+
+<br>
+
+```{r}
+
+performanceMeasures.1 <- function(train_true, train_pred,test_true, test_pred, data.name.1 = "Original Random Forest (with overfitting issue)",data.name.2 = "New Random Forest (with REF recommended variables)" ) {
+
+cmat <- table(actual = train_true, predicted = train_pred )
+accuracy <- sum(diag(cmat)) / sum(cmat)
+precision <- cmat[2, 2] / sum(cmat[, 2])
+recall <- cmat[2, 2] / sum(cmat[2, ])
+f1 <- 2 * precision * recall / (precision + recall)
+trainperf_df<-data.frame(model = data.name.1, precision = precision,
+recall = recall, f1 = f1)
+tmat <- table(actual = test_true, predicted = test_pred)
+accuracy <- sum(diag(tmat)) / sum(tmat)
+precision <- tmat[2, 2] / sum(tmat[, 2])
+recall <- tmat[2, 2] / sum(tmat[2, ])
+f1 <- 2 * precision * recall / (precision + recall)
+testperf_df <- data.frame(model = data.name.2, precision = precision,
+recall = recall, f1 = f1)
+perftable <- rbind(trainperf_df, testperf_df)
+perftable
+}
+
+
+test.final <- performanceMeasures.1(  df.test.1$income, pred_test, df.test$income,ifelse(predict(result_rfe1, rfe_test)[,"1"]>0.5,1,0))
+
+test.final <- as.data.frame(test.final)
+kbl(test.final,longtable = F, booktabs = TRUE, format.args = list(big.mark = ","),caption = "**Table G: Random Forrest on Testing Data **  ") %>% 
+  kable_classic(full_width = T, html_font = "Cambria") %>%
+  kable_styling(latex_options = c( "hold_position","striped","scale_down"),font_size = 12)%>%
+  row_spec(0,background="#EBCC2A")
+
+
+
+
+```
+
+<br>
+```{r eval=FALSE, warning=TRUE, include=FALSE}
+df.4 %>% 
+  group_by(Country) %>%
+  summarise(no_rows = length(Country))
+```
+
+```{r, fig.asp=1}
+
+
+wes<- wes_palette(5, name = "FantasticFox1", type = "discrete")
+
+calcAUC <- function(predcol, outcol) {
+  perf <- performance(prediction(predcol, outcol == '1'),'auc')
+  as.numeric(perf@y.values)
+}
+
+
+pred_rf<-predict(model_rf, newdata = df.test.1, type = "Prob")
+
+
+plot_roc <- function(predcol, outcol, colour_id = 2, overlaid =F ) {
+  ROCit_obj <- rocit (score = predcol, class = outcol == "1")
+  par(new = overlaid)
+  plot (ROCit_obj, col = c(colour_id,"green"), legend = FALSE, YIndex = FALSE, values = FALSE)
+}
+
+
+pred_glmnet <- model_glmnet %>% predict(newx = x.test, type='response')
+pred_glmnet.2 <- model_glmnet.2 %>% predict(newx = x.test, type='response')
+
+plot_roc (pred_rf[,"1"],df.test.1$income,colour_id = wes[1])  #original random forest
+plot_roc (ref_predict[,"1"],df.test$income,colour_id = wes[2], overlaid = T) #updated random forest after RFE
+plot_roc (pred_glmnet[,1],df.test$income,colour_id = wes[3], overlaid = T) #penalized lasso regression with lambda$min
+plot_roc (pred_glmnet.2[,1],df.test$income,colour_id = wes[5], overlaid = T) #penalized lasso regression with lambda$1se
+
+
+legend(x = "bottomright", legend=c("Random Forest (Overfitted)","Random Forest (RFE improved)","penalized logistic regression - lasso (Optimal Lambda)","penalized logistic regression - lasso (Simpler Model)", "chance line"),  
+       lty = c(rep(1,4), 3), lwd = 2,  col = c(wes[1],wes[2],wes[3],wes[5], "green"), text.font = 1)
+title("All model performances on the Testing data Set")
+```
+
+
+#### **3.4 Supervised Modeling Summary**
+
+- As shown above in the ROC plot, it is proven that with careful data transformation and feature selections, both logistic regression model and random forest model can be tuned to perform quite well on the testing data:
+
+    - Random Forest: The REF, with built in **cross validations** functionality, has proven to be extrememly useful to improve the orginal Random forest model.
+    
+    - After removing <span style="color: red;">**the video_view_for_last_30_days**</span> from the feature options, the <span style="color: red;">**subscribers_for_last_30_days**</span> has become the most important predictor for the model. 
+    
+    - The orginal rf model, performed well on the training data, but not the testing data, due to **over fitting** issues. 
+    
+    - In logistic regression, **Maximum Likelihood Estimation / MLE** was not used for parameter estimation, instead, the **Least Absolute Shrinkage and Selection Operator (LASSO)** parameter estimation was used.
+    
+    - By not using the Optimal Lambda, and using the Lambda within 1se, it has simplified model by panelised / dropping out 2 more parameters, but still maintained the model performance. 
+    
+ 
+    
+#### **3.5 Supervised Modeling Discussion**   
+
+- Apart from building models with good performance on the training data, there are still many areas worth considered, and discussed :
+ 
+    - Below table has listed all the levels in categorical variables, with artifacts of two few observations, and no observation in one of the target classes. These levels may not be good predictors for any generalisations, e.g if Youtuber county is Bangladesh, or channel type is Nonprofits/Activism, there will be 100% of chances of being in the low income group. 
+    
+    - In order to deal with the **Complete/Perfect Separation** issues in the dataset, the most recommended approach is using **regularization / continuity corrections**, which was used above in the logistic regression model. 
+    
+    - Due to the nature of our data structure, ordered by top 900s YouTuber by the number of subscribers. The model may have limited predicting power if applied on random selected youtube sampels. 
+    For example: the nature, and characteristics of world's top 1000 richest individuals maybe fundenmentally different to the general public. 
+    
+    - As described in literature reviews, **youtube ad viewships, membership type, number of likes, video duration**, could all be useful features to determine the popularities of YouTuber. These information were not included in our dataset. 
+    
+<br>
+
+
+```{r}
+
+table_result.1 <- as.data.frame(table_result)
+colnames(table_result.1) = c("Low_Income","High_Income" )
+
+
+kbl(table_result.1 [table_result.1$Low_Income == 0 | table_result.1$High_Income == 0,],longtable = F, booktabs = TRUE,  digits = 0,format.args = list(big.mark = ","),caption = "**Contingency Tabels for Categorical Variables, with complete separation**  ") %>% 
+  kable_classic(full_width = T, html_font = "Cambria") %>%
+  kable_styling(latex_options = c( "hold_position","striped","scale_down"),font_size = 12)%>%
+  row_spec(0,background="#EBCC2A")%>%
+  row_spec(c(1:2), background = "#78B7C5")%>%
+  row_spec(c(3:25), background = "#74A089")%>%
+  row_spec(c(26:28), background = "lightgrey") %>%
+  row_spec(c(29), background = "#DC5C5C") %>%
+  scroll_box(width = "50%", height = "480px")
+```
+
+<br>
+
+
+```{r}
+calcAUC(pred_rf[,"1"], df.test.1$income)
+calcAUC(pred_glmnet[,1], df.test$income)
+calcAUC(pred_glmnet.2[,1], df.test$income)
+calcAUC(ref_predict[,"1"], df.test$income)
+
+
+```
+
+
+### **4. Clustering**
+
+
+For the below clustering part, only the numerical variables were selected for clustering unsupervised model.
+
+
+#### **4.1 Data Preparation**
+
+Before performing clustering analysis, the data needs to be : 
+
+- **Scaling** : the data need to be scaled, centering the data with mean of 0 for all the variables
+
+- **Principal Component Analysis (PCA)** to be conducted, in order to transform high dimensional data into two dimension for easier visualization . 
+
+
+```{r}
+
+df.combine <- rbind(df.train, df.test)
+cluster.df <- df.combine %>% select(c(numericVars))  %>% select (-c(subscribers_for_last_30_days)) 
+#character_vars <- lapply(cluster.df, class) == "character"
+#cluster.df[, character_vars] <- lapply(cluster.df[, character_vars], as.factor)
+#summary(cluster.df)
+```
+
+
+```{r}
+scaled_df <- scale(cluster.df)
+attributes(scaled_df)$`scaled:center`
+attributes(scaled_df)$`scaled:scale`
+#summary(scaled_df)
+```
+
+```{r eval=FALSE, include=FALSE}
+
+## this is the block of code with pred(pca) issue
+
+scaled_df <- scale(cluster.df)
+princ <- prcomp(scaled_df) 
+nComp <- 2        
+project2D_Original <- as.data.frame(scale(predict(princ, cluster.df)[,1:nComp]))
+ggplot()+geom_point(data = project2D_Original, aes(PC1,PC2))
+```
+
+
+```{r include=FALSE}
+scaled_df <- scale(cluster.df)
+princ <- prcomp(scaled_df) 
+nComp <- 2 
+project2D <- as.data.frame(princ$x[,1:2])
+ptest.1 <-ggplot()+geom_point(data = project2D, aes(PC1,PC2))
+#ptest.1
+#ptest.2 <- autoplot(princ)
+#grid.arrange (ptest.1,ptest.2, ncol = 2)
+#kbl(t(t(princ$x %*% t(princ$rotation)) + princ$center))
+
+library(ggfortify) 
+pca.test <-  prcomp(cluster.df, 
+                   center = TRUE, 
+                   scale = TRUE) 
+pca.test.plot <- autoplot(pca.test, 
+                          data = cluster.df, 
+                          ) 
+pca.test.plot
+
+biplot(pca.test) 
+```
+
+
+<br>
+
+#### **4.2 Hierarchical Clustering**
+
+- Below utilize the dist function, to calculate 'distance' for the dataset. 
+
+- Here the method = "Euclidean" distance were used.
+
+- The Hierarchical Clustering is performed, with K set to be 2, or 8. (Please refer section below for how 8 was determined)
+
+- The print_cluster function is to print each cluster, with specific columns information added from original data frame . 
+The specific columns can be any column. Even the categorical columns which were not used for clustering analysis . 
+
+```{r}
+d <- dist(scaled_df, method="euclidean")
+pfit <- hclust(d, method="ward.D2") 
+hgroups <- cutree(pfit, k=8)
+hgroups.2 <- cutree(pfit, k=2)
+
+
+print_clusters <- function(df, groups, cols_to_print) {
+Ngroups <- max(groups)
+for (i in 1:Ngroups) {
+print(paste("cluster", i))
+print(df[groups == i, cols_to_print])
+}
+}
+
+#print_clusters(df.combine, hgroups, c("Country","category"))
+
+```
+
+Combining the clustering results to each row of the project2D dataframe. 
+
+```{r}
+hclust.project2D <- cbind(project2D, cluster=as.factor(hgroups), country=df.combine$Country)
+
+#hclust.project2D
+```
+
+
+Below function was using grDevices to calculate the data end point for each clusters, in order to be able to plot polygons. 
+
+```{r}
+
+library('grDevices')
+find_convex_hull <- function(proj2Ddf, groups) {
+do.call(rbind,
+lapply(unique(groups),
+FUN = function(c) {
+f <- subset(proj2Ddf, cluster==c);
+f[chull(f),]
+}
+)
+)
+}
+```
+<br>
+
+```{r}
+
+hclust.hull <- find_convex_hull(hclust.project2D, hgroups)
+
+ggplot(hclust.project2D, aes(x=PC1, y=PC2)) +
+geom_point(aes(colour=cluster), alpha=0.5)+ guides(colour="none") +
+geom_polygon(data=hclust.hull, aes(group=cluster, fill=as.factor(cluster)),
+alpha=0.4, linetype=0) + theme(text=element_text(size=8),legend.position = c(0.1, 0.75),legend.background = element_rect(fill = NA)) + scale_fill_manual(values = rev(wes_palette(8, name = "Darjeeling1", type = "continuous")), name = "") + scale_color_manual(values= rev(wes_palette("Darjeeling1", n = 8, type = "continuous"))) + ggtitle("Hierarchical Clustering plots with K = 8 ")
+# +scale_y_continuous(limits = c(-5, 6.5))+ 
+# scale_x_continuous(limits = c(-20, 1))
+
+
+
+```
+<br>
+- clustering plots (seperated into two plots for better visualation ) with K = 8 
+<br>
+```{r warning=FALSE,out.width= "100%"}
+
+cl.1 <- ggplot(hclust.project2D[hclust.project2D$cluster %in% c(1,2,3,4,8),], aes(x=PC1, y=PC2)) +
+geom_point(aes(colour=cluster), alpha=0.5)+ guides(colour="none") +
+geom_polygon(data=hclust.hull[hclust.hull$cluster %in% c(1,2,3,4,8),], aes(group=cluster, fill=as.factor(cluster)),
+alpha=0.4, linetype=0) + theme(text=element_text(size=8),legend.position = c(0.17, 0.85),legend.background = element_rect(fill = NA)) + scale_fill_manual(values = rev(wes_palette(5, name = "Darjeeling1", type = "discrete")), name = "") + scale_color_manual(values= rev(wes_palette("Darjeeling1", n = 5, type = "discrete"))) +scale_y_continuous(limits = c(-5, 6.5))+ scale_x_continuous(limits = c(-20, 1))
+
+
+
+
+cl.2 <- ggplot(hclust.project2D[hclust.project2D$cluster %in% c(5,6,7),], aes(x=PC1, y=PC2)) +
+geom_point(aes(colour=cluster), alpha=0.5) + guides(colour="none") +
+geom_polygon(data=hclust.hull[hclust.hull$cluster %in% c(5,6,7),], aes(group=cluster, fill=as.factor(cluster)),
+alpha=0.4, linetype=0) + theme(text=element_text(size=8),legend.position = c(0.17, 0.85),legend.background = element_rect(fill = NA), axis.text.y = element_blank(),axis.ticks.y = element_blank(), axis.title.y = element_blank()) + scale_fill_manual(values = rev(wes_palette(4, name = "Darjeeling1", type = "discrete")), name = "") + scale_color_manual(values= rev(wes_palette("Darjeeling1", n = 4, type = "discrete")))+scale_y_continuous(limits = c(-5, 6.5))+ scale_x_continuous(limits = c(-20, 1))
+
+#grid.arrange(cl.1,cl.2,ncol = 2)
+
+grid.arrange(arrangeGrob (cl.1, ncol = 1, nrow =1 ), arrangeGrob (cl.2, ncol=1, nrow = 1), widths = c(1.2,1),top = "Hierarchical Clustering plots with K = 8 (seperated into two plots for better visualation )")
+
+
+```
+<br>
+
+- By using Clusterboot to check stability of all the 8 clusters. 
+
+- As shown below, the cluster 2, 3 were not stable, the rest performed well and quite stable. 
+
+```{r include=FALSE}
+library(fpc)
+kbest.p <- 8
+cboot.hclust <- clusterboot(scaled_df, clustermethod=hclustCBI,
+method="ward.D2", k=kbest.p)
+summary(cboot.hclust$result)
+values <- 1 - cboot.hclust$bootbrd/100
+values
+```
+<br>
+```{r}
+
+sqr_euDist <- function(x, y) {
+    sum((x - y)^2)}
+  
+wss <- function(clustermat) {
+    c0 <- colMeans(clustermat)
+    sum(apply( clustermat, 1, FUN=function(row) {sqr_euDist(row, c0)} ))
+}
+
+
+wss_total <- function(scaled_df, labels) {
+    wss.sum <- 0
+    k <- length(unique(labels))
+    for (i in 1:k) 
+        wss.sum <- wss.sum + wss(subset(scaled_df, labels == i))
+    wss.sum
+}
+
+
+
+tss <- function(scaled_df) {
+   wss(scaled_df)
+}
+
+
+CH_index <- function(scaled_df, kmax, method="kmeans") {
+    if (!(method %in% c("kmeans", "hclust"))) 
+        stop("method must be one of c('kmeans', 'hclust')")
+
+    npts <- nrow(scaled_df)
+    wss.value <- numeric(kmax) 
+    wss.value[1] <- wss(scaled_df)
+
+    if (method == "kmeans") {
+        # kmeans
+        for (k in 2:kmax) {
+            clustering <- kmeans(scaled_df, k, nstart=10, iter.max=100)
+            wss.value[k] <- clustering$tot.withinss
+        } 
+    } else {
+        # hclust
+        d <- dist(scaled_df, method="euclidean")
+        pfit <- hclust(d, method="ward.D2")
+        for (k in 2:kmax) {
+            labels <- cutree(pfit, k=k)
+            wss.value[k] <- wss_total(scaled_df, labels)
+        }
+    }
+    bss.value <- tss(scaled_df) - wss.value   # this is a vector
+    B <- bss.value / (0:(kmax-1))             # also a vector
+    W <- wss.value / (npts - 1:kmax)          # also a vector
+
+    data.frame(k = 1:kmax, CH_index = B/W, WSS = wss.value)
+}
+```
+
+```{r warning=FALSE}
+crit.df <- CH_index(scaled_df, 10, method="hclust")
+fig1 <- ggplot(crit.df, aes(x=k, y=CH_index)) +
+geom_point(colour="#00A08A") + geom_line(colour="#00A08A") +
+scale_x_continuous(breaks=1:10, labels=1:10) +
+labs(y="CH index") + theme(text=element_text(size=8))
+fig2 <- ggplot(crit.df, aes(x=k, y=WSS)) +
+geom_point(colour="#F98400") + geom_line(colour="#F98400") +
+scale_x_continuous(breaks=1:10, labels=1:10) +
+theme(text=element_text(size=8))
+grid.arrange(fig1, fig2, nrow=1)
+
+```
+
+- Above are CH index and WSS plots, based on the CH index, the K was decided to set to 8 for above Hierarchical Clustering. 
+
+<br>
+<br>
+
+
+#### **4.3 K-MEANS Clustering**
+
+
+```{r}
+kbest.p <- 3
+kmClusters <- kmeans(scaled_df, kbest.p, nstart=100, iter.max=100)
+#kmClusters$centers
+#kmClusters$size
+```
+
+
+```{r}
+groups<- kmClusters$cluster
+#print_clusters(df.4, groups, "Country")
+```
+
+
+```{r}
+library(fpc)
+kmClustering.ch <- kmeansruns(scaled_df, krange=1:10, criterion="ch")
+kmClustering.ch$bestk
+kmClustering.asw <- kmeansruns(scaled_df, krange=1:10, criterion="asw")
+kmClustering.asw$bestk
+
+# Compare the CH values for kmeans() and hclust().
+print("CH index from kmeans for k=1 to 10:")
+print(kmClustering.ch$crit)
+
+print("ASW index from kmeans for k=1 to 10:")
+print(kmClustering.asw$crit)
+
+```
+
+- Based on above recommendations from CH and ASW index, the K were chosen to be 8 or 2. 
+- The plot below are the visual representations of best K for K-Mean clusterings.
+
+```{r}
+library(gridExtra)
+kmCritframe <- data.frame(k=1:10, ch=kmClustering.ch$crit,
+asw=kmClustering.asw$crit)
+fig1 <- ggplot(kmCritframe, aes(x=k, y=ch)) +
+geom_point() + geom_line(colour="#00A08A") +
+scale_x_continuous(breaks=1:10, labels=1:10) +
+labs(y="CH index") + theme(text=element_text(size=8))
+fig2 <- ggplot(kmCritframe, aes(x=k, y=asw)) +
+geom_point() + geom_line(colour="#F98400") +
+scale_x_continuous(breaks=1:10, labels=1:10) +
+labs(y="ASW") + theme(text=element_text(size=8))
+grid.arrange(fig1, fig2, nrow=1)
+
+```
+
+<br>
+
+
+
+```{r}
+
+fig <- c()
+kvalues <- seq(2,8)
+for (k in kvalues) {
+groups <- kmeans(scaled_df, k, nstart=100, iter.max=100)$cluster
+kmclust.project2D <- cbind(project2D, cluster=as.factor(groups),
+country=df.4$Country)
+kmclust.hull <- find_convex_hull(kmclust.project2D, groups)
+assign(paste0("fig", k),
+ggplot(kmclust.project2D, aes(x=PC1, y=PC2)) +
+geom_point(aes( color=cluster, alpha = 0.1)) +
+geom_polygon(data=kmclust.hull, aes(group=cluster, fill=cluster),
+alpha=0.1, linetype=0) +
+labs(title = sprintf("k = %d", k)) +
+theme(legend.position="none", text=element_text(size=5))
+)
+}
+
+
+
+grid.arrange(arrangeGrob (fig2, ncol = 1, nrow =1 ), arrangeGrob (fig8, ncol=1, nrow = 1), widths = c(1,1),top = "K-Mean Clustering plots with K = 2 and K = 8")
+
+
+```
+
+<br>
+
+- Above has demonstrated the K mean clustering did a better job when K set to 2, comparing the the hierarchy clustering when K set to 2.
+- Clustering can be used during the EDA process, to discover intrinsic relationship within the dataset. 
+
+
+
+
+```{r include=FALSE}
+library(factoextra)
+km <- kmeans(scaled_df, 2, nstart=100, iter.max=100)
+km.8 <- kmeans(scaled_df, nstart=100, iter.max=100, centers = 8)
+fviz_cluster(km , cluster.df, ellipse.type = "convex",labelsize = 1, alpha = 0.4)+
+theme(panel.background = element_rect(fill = "#003333"),panel.grid.major = element_blank(),panel.grid.minor = element_line(colour = "black"))
+
+```
+
+```{r}
+require("cluster")
+sil <- silhouette(km$cluster, dist(scaled_df))
+kv.1 <- fviz_cluster(km, cluster.df, labelsize = 1,pointsize = 0.5 ,alpha = 0.2,  ellipse.type = "convex") + theme(panel.background = element_rect(fill = "#003333"),panel.grid.major = element_blank(),panel.grid.minor = element_line(colour = "black"),legend.position = c(0.07, 0.9), legend.key = element_rect(fill = NA),legend.key.size = unit(1, 'cm'), legend.key.height = unit(0.3, 'cm'), legend.key.width = unit(0.3, 'cm'), legend.title = element_blank(), legend.text =element_text(size=7, color = "white"),
+    plot.title = element_text(size=6, face = "bold"),axis.text=element_text(size=8),axis.title=element_text(size=8),legend.background = element_rect(fill = NA))
+
+kv.2 <- fviz_silhouette(sil,abel = TRUE) + theme(legend.position = c(0.87, 0.9), legend.key = element_rect(fill = NA),legend.key.size = unit(1, 'cm'), legend.key.height = unit(0.3, 'cm'), legend.key.width = unit(0.3, 'cm'), legend.title = element_blank(), legend.text =element_text(size=7, color = "Black"),
+    plot.title = element_text(size=6, face = "bold"),axis.text=element_text(size=8),axis.title=element_text(size=8),legend.background = element_rect(fill = NA))
+
+
+
+sil.8 <- silhouette(km.8$cluster, dist(scaled_df))
+kv.3 <- fviz_cluster(km.8, cluster.df,labelsize = 1, pointsize = 0.5 ,alpha = 0.2)+ theme(panel.background = element_rect(fill = "#003333"),panel.grid.major = element_blank(),panel.grid.minor = element_line(colour = "black"),legend.position = c(0.07, 0.75), legend.key = element_rect(fill = NA),legend.key.size = unit(0.8, 'cm'), legend.key.height = unit(0.2, 'cm'), legend.key.width = unit(0.2, 'cm'), legend.title = element_blank(), legend.text =element_text(size=7, color = "white"),
+    plot.title = element_text(size=6, face = "bold"),axis.text=element_text(size=8),axis.title=element_text(size=8),legend.background = element_rect(fill = NA))
+kv.4 <- fviz_silhouette(sil.8,abel = TRUE)+ theme(legend.position = c(0.87, 0.9), legend.key = element_rect(fill = NA),legend.key.size = unit(1, 'cm'), legend.key.height = unit(0.3, 'cm'), legend.key.width = unit(0.3, 'cm'), legend.title = element_blank(), legend.text =element_text(size=7, color = "Black"),
+    plot.title = element_text(size=6, face = "bold"),axis.text=element_text(size=8),axis.title=element_text(size=8),legend.background = element_rect(fill = NA))
+
+
+
+
+grid.arrange( kv.1,kv.2,kv.3,kv.4, nrow=2)
+
+
+```
+
+- **Above plots by using fviz_cluster and fviz_silhouette, to further investigating the clustering results.** 
+
+- **The silhouette value is a measure of how similar an object is to its own cluster (cohesion), compared to other clusters (separation).**
+
+- **Silouette analysis can be used to visualize the separation distances. It can also be used to choose the optimal number of clusters.**
+
+- **Based on the Silouette plot for 2 clusters. Cluster 2 is below the average silhouette scores, and maybe a bad K pick.**
+
+
+
+<br>
+
+
+### References
+
+
+<div id="refs"></div>
+
+
+
+
+
+
+
+```{r eval=FALSE, include=FALSE}
+
+
+library(shiny)
+library(shinyWidgets)
+all_vars <- c( catVars, numericVars )
+
+
+ui <- fluidPage(
+sidebarPanel(
+      selectInput("plot_type", "Model Type", choices = c("Single Variable Models", "Multi Variables Models","K-mean Clustering")),
+      conditionalPanel(
+        condition = "input.plot_type == 'Single Variable Models'",
+        pickerInput(
+          inputId = "selected_attributes",
+          label = "Select attributes:",
+          choices = all_vars,
+          selected = "category",
+          multiple = TRUE,
+          options = list(`actions-box` = TRUE)
+        )
+      ),
+      conditionalPanel(
+        condition = "input.plot_type == 'K-mean Clustering'",
+        pickerInput(
+          inputId = "kn",
+          label = "Select Number of Clusters:",
+          choices = c(1:20),
+          options = list(`actions-box` = TRUE)
+        ),
+        sliderInput ("alpha", "Select Point Transparency:", min = 0.1, max = 1, value = 0.3)
+      ),
+      
+      conditionalPanel(
+        condition = "input.plot_type == 'Multi Variables Models'",
+        
+        pickerInput(
+          inputId = "modelnames",
+          label = "Please select models:",
+          choices = c("Simple Random Forest","Random Forest with RFE", "Penalized Lasso Regression (optimal)", "Penalized Lasso Regression (balanced)"),
+          selected = "Penalized Lasso Regression (optimal)",
+          multiple = TRUE,
+          options = list(`actions-box` = TRUE)
+        )
+      )
+      ,
+    hr(),
+    print("Data Source: 'Global YouTube Statistics 2023' "),
+    tags$a(href="https://www.kaggle.com/datasets/nelgiriyewithana/global-youtube-statistics-2023 ", "(Link)"),
+    hr(),
+    print("Franco Meng - 23370209"),
+    tags$script('
+          $(document).ready(function(){
+          var d = new Date();
+          var target = $("#clientTime");
+          target.val(d.toLocaleString());
+          target.trigger("change");
+          });
+          '),
+    textInput("clientTime", "", value = "")
+      
+),
+mainPanel(
+      plotOutput("plot",height = "800px", width = "800px"),
+      htmlOutput(outputId = "explain")
+      
+    ))
+
+server <- function(input, output) {output$plot <- renderPlot({
+    if (input$plot_type == "Single Variable Models") {
+      output$explain <- renderUI({ HTML( paste("<b>", "</b>" ))})
+       selected_attrs <- input$selected_attributes
+       n=0
+       pi.list<- ""
+       colour.list <- ""
+       wes<- wes_palette(length(selected_attrs), name = "Darjeeling1", type = "continuous")
+       for(v in selected_attrs){
+       pi <- paste('pred_', v, sep='')
+      n = n+1
+      plot_roc (df.test[,pi],df.test$income, colour_id = wes[n], overlaid = T)
+      pi.list <- c(pi.list, pi)
+      colour.list <- c(colour.list, wes[n])
+      legend(x = "topleft", legend=c(pi.list[2:length(pi.list)], "chance line"),  
+      lty = c(rep(1, length(pi.list)-1), 3), lwd = 2,  col = c(colour.list[2:length(pi.list)], "green"), text.font = 1)}
+       
+ 
+    }
+  
+  
+  else if (input$plot_type == "K-mean Clustering") {
+    output$explain <- renderUI({ HTML( paste("<b>", "</b>" ))})
+    
+       k <- input$kn
+       al <- input$alpha
+       km <- kmeans(scaled_df, nstart=100, iter.max=100, centers = k)
+       fviz_cluster(km , cluster.df, ellipse.type = "convex",labelsize = 1, alpha = al)+
+      theme(panel.background = element_rect(fill = "#003333"),panel.grid.major = element_blank(),panel.grid.minor = element_line(colour = "black"))
+  }
+  
+   else if (input$plot_type == "Multi Variables Models") {
+       wes<- wes_palette(5, name = "FantasticFox1", type = "discrete")
+       modelist <- input$modelnames
+       if (length (modelist) < 1){return(NULL)}
+       else {
+         
+       output$explain <- renderUI({ HTML( paste("<b> <span style='color: #46ACC8;'>penalized logistic regression - lasso (Optimal Lambda) :  Category, Country, Channel Type, Year, Subscribers, Video views, Uploads </span>", "<br>", "<span style='color: #B40F20;'>penalized logistic regression - lasso (Balanced Lambda) :  Category, Country, Year, Subscribers, Video views </span>",  "<br>", "<span style='color: #DD8D29;'>Random Forest (Overfitted) :  Category, Country, Channel Type, Year, Subscribers, Video views, Uploads</span>", "<br>", "<span style='color: #E2D200;'>Random Forest with RFE :  Subscribers, Country, Video_views</span>", "</b>" ))})
+       
+ 
+       
+       if ("Simple Random Forest" %in% modelist){
+        plot_roc (pred_rf[,"1"],df.test.1$income,colour_id = wes[1], overlaid = T)}
+       if ("Random Forest with RFE" %in% modelist){
+         plot_roc (ref_predict[,"1"],df.test$income,colour_id = wes[2], overlaid = T)
+       }
+       if ("Penalized Lasso Regression (optimal)"%in% modelist){
+         plot_roc (pred_glmnet[,1],df.test$income,colour_id = wes[3], overlaid = T)
+       }
+       if ("Penalized Lasso Regression (balanced)"%in% modelist){
+         plot_roc (pred_glmnet.2[,1],df.test$income,colour_id = wes[5], overlaid = T)
+       }
+       legend(x = "bottomright", legend=c("penalized logistic regression - lasso (Optimal Lambda)","penalized logistic regression - lasso (Simpler Model)","Random Forest (Overfitted)","Random Forest (RFE improved)", "chance line"),  
+       lty = c(rep(1,4), 3), lwd = 2,  col = c(wes[3],wes[5], wes[1],wes[2],"green"), text.font = 1)
+       title("All model performances on the Testing data Set") }
+     
+
+       
+           
+    }
+  
+  
+  
+  
+  
+  
+  
+})}
+
+shinyApp(ui = ui, server = server)
+
+
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
