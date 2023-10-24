@@ -1,5 +1,7 @@
 # Machine-Learning
 
+* Please download the - Machine Learning Project _ Final.html - file for final report (preview may not work due to file size)
+  
 Further to the previous EDA project, this project focus on Machine Learning , by using supervised and un supervised models, using R Markdown, and deployed user friendly Shiny.app. 
 
 Classificaiton, Random forrest, Recursive Feature Elimination, PCA, Generalised Lasso Regression, Maximum Likelihood, Deviance, AIC, Naive Bayes, Roc Curve, Accuracy/precision/specifity/sensitivity, importance, Denisity Plots, LIME Explainer, Shiny Apps, K Mean Clustering, Hierachy Clustering.
